@@ -21,6 +21,7 @@
 //! GuestRegionMmap objects.
 
 use std::borrow::Borrow;
+use std::cmp::Ordering;
 use std::error;
 use std::fmt;
 use std::io::{Read, Write};
@@ -139,6 +140,26 @@ impl GuestRegionMmap {
         // is safe because we've just range-checked addr using check_address.
         self.check_address(addr)
             .map(|addr| self.as_ptr().wrapping_offset(addr.raw_value() as isize))
+    }
+}
+
+impl Ord for GuestRegionMmap {
+    fn cmp(&self, other: &GuestRegionMmap) -> Ordering {
+        self.guest_base.cmp(&other.guest_base)
+    }
+}
+
+impl PartialOrd for GuestRegionMmap {
+    fn partial_cmp(&self, other: &GuestRegionMmap) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Eq for GuestRegionMmap {}
+
+impl PartialEq for GuestRegionMmap {
+    fn eq(&self, other: &GuestRegionMmap) -> bool {
+        self.guest_base == other.guest_base
     }
 }
 
@@ -427,6 +448,28 @@ impl GuestMemoryMmap {
         }
 
         Ok(Self { regions })
+    }
+
+    /// Add a new `GuestRegionMmap` to a vector of regions.
+    ///
+    /// # Arguments
+    ///
+    /// * `region` - The region to add.
+    ///               The region shouldn't overlap with the existing regions.
+    pub fn add_region(&mut self, region: GuestRegionMmap) -> result::Result<(), Error> {
+        match self.regions.binary_search(&region) {
+            Ok(_) => return Err(Error::MemoryRegionOverlap),
+            Err(pos) => {
+                if self.regions[pos].end_addr() >= region.start_addr()
+                    || region.end_addr() >= self.regions[pos + 1].start_addr()
+                {
+                    return Err(Error::MemoryRegionOverlap);
+                }
+                self.regions.insert(pos, region);
+            }
+        }
+
+        Ok(())
     }
 
     /// Convert an absolute address into an address space (GuestMemory)
